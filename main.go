@@ -44,7 +44,7 @@ func main() {
 	absStatic, _ := filepath.Abs(*staticDir)
 	absUpload, _ := filepath.Abs(*uploadDir)
 
-	addr := fmt.Sprintf(":%d", *port)
+	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	srv := server.NewServer(addr, absStatic, absUpload)
 
 	fmt.Println("========================================")
@@ -63,6 +63,10 @@ func main() {
 	} else {
 		fmt.Println("  未检测到局域网IP")
 	}
+	fmt.Println()
+	fmt.Println("提示: 如果其他设备无法访问，请检查Windows防火墙")
+	fmt.Println("  以管理员身份运行:")
+	fmt.Printf("  netsh advfirewall firewall add rule name=\"Chat\" dir=in action=allow protocol=TCP localport=%d\n", *port)
 	fmt.Println()
 	fmt.Println("========================================")
 	fmt.Println()
