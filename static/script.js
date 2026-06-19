@@ -19,8 +19,9 @@ const emojiPicker = document.getElementById('emoji-picker');
 
 const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘',
     '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐',
-    '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢',
-    '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👋', '🤚', '✋', '🖖', '👏', '🙌', '👐', '🤲'];
+    '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮',
+    '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👋', '🤚', '✋', '🖖', '👏', '🙌', '👐', '🤲',
+    '❤️', '🔥', '💯', '🎉', '🎊', '✅', '⭐', '🌟', '💪', '🙏', '💕', '💗', '💖', '💝', '🤔', '😮'];
 
 emojis.forEach(emoji => {
     const span = document.createElement('span');
@@ -29,6 +30,7 @@ emojis.forEach(emoji => {
     span.onclick = () => {
         messageInput.value += emoji;
         emojiPicker.style.display = 'none';
+        messageInput.focus();
     };
     emojiPicker.querySelector('.emoji-grid').appendChild(span);
 });
@@ -90,7 +92,8 @@ function handleMessage(msg) {
 
 function addChatMessage(msg) {
     const div = document.createElement('div');
-    div.className = 'message';
+    const isSelf = msg.username === username;
+    div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
 
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
@@ -139,6 +142,9 @@ function updateUserList(users) {
     users.forEach(user => {
         const li = document.createElement('li');
         li.textContent = user;
+        if (user === username) {
+            li.style.background = 'rgba(102, 126, 234, 0.3)';
+        }
         userList.appendChild(li);
     });
     onlineCount.textContent = `${users.length} 人在线`;
@@ -165,7 +171,8 @@ messageInput.onkeypress = (e) => {
     }
 };
 
-emojiBtn.onclick = () => {
+emojiBtn.onclick = (e) => {
+    e.stopPropagation();
     emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
 };
 
