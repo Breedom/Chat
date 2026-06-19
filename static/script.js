@@ -93,7 +93,8 @@ function handleMessage(msg) {
 function addChatMessage(msg) {
     const div = document.createElement('div');
     const isSelf = msg.username === username;
-    div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
+    const isAI = msg.username === 'DeepSeek';
+    div.className = `message ${isSelf ? 'message-self' : isAI ? 'message-ai' : 'message-others'}`;
 
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 

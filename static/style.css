@@ -232,6 +232,24 @@ body {
     color: #10b981;
 }
 
+.message-ai .message-username {
+    color: #f59e0b;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.message-ai .message-username::before {
+    content: '🤖';
+    font-size: 14px;
+}
+
+.message-ai .message-content {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
 .message-time {
     color: #9ca3af;
     font-size: 11px;
