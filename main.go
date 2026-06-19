@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/Breedom/Chat/server"
+	"github.com/mdp/qrterminal/v3"
 )
 
 func getLocalIPs() []string {
@@ -63,6 +64,19 @@ func main() {
 	} else {
 		fmt.Println("  未检测到局域网IP")
 	}
+	fmt.Println()
+
+	fmt.Println("手机扫码访问:")
+	for _, ip := range ips {
+		url := fmt.Sprintf("http://%s:%d", ip, *port)
+		fmt.Printf("\n  [%s]\n", ip)
+		qrterminal.GenerateWithConfig(url, qrterminal.Config{
+			Level:     qrterminal.L,
+			Writer:    os.Stdout,
+			QuietZone: 1,
+		})
+	}
+
 	fmt.Println()
 	fmt.Println("提示: 如果其他设备无法访问，请检查Windows防火墙")
 	fmt.Println("  以管理员身份运行:")
