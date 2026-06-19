@@ -3,7 +3,6 @@ module github.com/Breedom/Chat
 go 1.26.4
 
 require (
-	github.com/go-deepseek/deepseek v0.8.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdp/qrterminal/v3 v3.2.1
 )

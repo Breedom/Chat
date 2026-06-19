@@ -51,11 +51,6 @@ func (h *Hub) Run() {
 			h.sendUserList()
 
 		case message := <-h.broadcast:
-			var msg Message
-			if err := json.Unmarshal(message, &msg); err == nil && IsAIMessage(msg.Content) {
-				go h.handleAIMessage(msg)
-				continue
-			}
 			h.mu.RLock()
 			for client := range h.clients {
 				select {
@@ -68,29 +63,6 @@ func (h *Hub) Run() {
 			h.mu.RUnlock()
 		}
 	}
-}
-
-func (h *Hub) handleAIMessage(msg Message) {
-	response, err := GetAIResponse(msg.Username, msg.Content)
-	if err != nil {
-		response = "AI处理出错: " + err.Error()
-	}
-
-	aiMsg := Message{
-		Type:     "message",
-		Username: "DeepSeek",
-		Content:  response,
-	}
-	data, _ := json.Marshal(aiMsg)
-
-	h.mu.RLock()
-	for client := range h.clients {
-		select {
-		case client.send <- data:
-		default:
-		}
-	}
-	h.mu.RUnlock()
 }
 
 func (h *Hub) sendUserList() {

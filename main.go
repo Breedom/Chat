@@ -48,8 +48,6 @@ func main() {
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	srv := server.NewServer(addr, absStatic, absUpload)
 
-	server.InitAI()
-
 	fmt.Println("========================================")
 	fmt.Println("       局域网聊天室服务器")
 	fmt.Println("========================================")
@@ -84,7 +82,6 @@ func main() {
 	fmt.Println("  以管理员身份运行:")
 	fmt.Printf("  netsh advfirewall firewall add rule name=\"Chat\" dir=in action=allow protocol=TCP localport=%d\n", *port)
 	fmt.Println()
-	fmt.Println("AI功能: 使用 @deepseek <问题> 调用AI助手")
 	fmt.Println("========================================")
 	fmt.Println()
 

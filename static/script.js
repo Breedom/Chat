@@ -16,6 +16,11 @@ const imageInput = document.getElementById('image-input');
 const fileInput = document.getElementById('file-input');
 const emojiBtn = document.getElementById('emoji-btn');
 const emojiPicker = document.getElementById('emoji-picker');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeModalBtn = document.getElementById('close-modal-btn');
+const qrcodeDiv = document.getElementById('qrcode');
+const currentUrlP = document.getElementById('current-url');
 
 const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘',
     '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐',
@@ -93,8 +98,7 @@ function handleMessage(msg) {
 function addChatMessage(msg) {
     const div = document.createElement('div');
     const isSelf = msg.username === username;
-    const isAI = msg.username === 'DeepSeek';
-    div.className = `message ${isSelf ? 'message-self' : isAI ? 'message-ai' : 'message-others'}`;
+    div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
 
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
@@ -189,28 +193,7 @@ imageInput.onchange = async (e) => {
         return;
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('username', username);
-
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-
-        const result = await response.json();
-
-        ws.send(JSON.stringify({
-            type: 'message',
-            username: username,
-            content: result.url,
-            data_type: 'image'
-        }));
-    } catch (error) {
-        alert('上传失败: ' + error.message);
-    }
-
+    await uploadAndSendImage(file);
     imageInput.value = '';
 };
 
@@ -274,5 +257,66 @@ function previewImage(src) {
 document.onclick = (e) => {
     if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
         emojiPicker.style.display = 'none';
+    }
+};
+
+document.addEventListener('paste', async (e) => {
+    const items = e.clipboardData.items;
+    for (let item of items) {
+        if (item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            await uploadAndSendImage(file);
+            break;
+        }
+    }
+});
+
+async function uploadAndSendImage(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('username', username);
+
+    try {
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        ws.send(JSON.stringify({
+            type: 'message',
+            username: username,
+            content: result.url,
+            data_type: 'image'
+        }));
+    } catch (error) {
+        alert('上传失败: ' + error.message);
+    }
+}
+
+settingsBtn.onclick = () => {
+    qrcodeDiv.innerHTML = '';
+    const url = window.location.href;
+    new QRCode(qrcodeDiv, {
+        text: url,
+        width: 200,
+        height: 200,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+    });
+    currentUrlP.textContent = url;
+    settingsModal.style.display = 'flex';
+};
+
+closeModalBtn.onclick = () => {
+    settingsModal.style.display = 'none';
+};
+
+settingsModal.onclick = (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.style.display = 'none';
     }
 };
