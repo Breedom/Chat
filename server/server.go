@@ -147,6 +147,15 @@ func (s *Server) handleBroadcast(data []byte) {
 		s.hub.broadcastStopTyping(msg.Username)
 	case "reaction":
 		s.hub.handleReaction(msg)
+	case "recall":
+		s.store.Recall(msg.MsgID)
+		s.hub.broadcast <- data
+	case "export":
+		msgs := s.store.GetRecent()
+		exportData, _ := json.Marshal(msgs)
+		resp := Message{Type: "export_data", Content: string(exportData)}
+		respData, _ := json.Marshal(resp)
+		s.hub.sendToUser(msg.Username, respData)
 	default:
 		s.hub.broadcast <- data
 	}

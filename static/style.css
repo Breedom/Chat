@@ -1,3 +1,35 @@
+:root {
+    --bg-primary: #f0f2f5;
+    --bg-secondary: #f5f7fb;
+    --bg-card: white;
+    --bg-input: #f0f2f5;
+    --text-primary: #333;
+    --text-secondary: #666;
+    --text-muted: #9ca3af;
+    --border-color: #e8ecf1;
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 15px rgba(0,0,0,0.08);
+    --bubble-other-bg: white;
+    --bubble-other-text: #374151;
+    --code-bg: #1e1e1e;
+}
+
+body.dark {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-card: #0f3460;
+    --bg-input: #1a1a2e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #b0b0b0;
+    --text-muted: #777;
+    --border-color: #2a2a4a;
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 15px rgba(0,0,0,0.4);
+    --bubble-other-bg: #1a1a3e;
+    --bubble-other-text: #e0e0e0;
+    --code-bg: #0d1117;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -6,9 +38,10 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background: #f0f2f5;
+    background: var(--bg-primary);
     height: 100vh;
     overflow: hidden;
+    transition: background 0.3s, color 0.3s;
 }
 
 /* ========== Login Screen ========== */
@@ -21,7 +54,7 @@ body {
 }
 
 .login-box {
-    background: white;
+    background: var(--bg-card);
     padding: 50px 40px;
     border-radius: 16px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
@@ -35,7 +68,7 @@ body {
 }
 
 .login-box h1 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 25px;
     font-size: 28px;
     font-weight: 600;
@@ -841,4 +874,136 @@ body {
     background: rgba(255,255,255,0.15);
     border-left-color: rgba(255,255,255,0.6);
     color: rgba(255,255,255,0.8);
+}
+
+/* ========== Dark Mode Overrides ========== */
+body.dark .sidebar {
+    background: linear-gradient(180deg, #0f0f23 0%, #0a0a1a 100%);
+}
+
+body.dark .header {
+    background: var(--bg-card);
+    border-bottom-color: var(--border-color);
+}
+
+body.dark .header h2 {
+    color: var(--text-primary);
+}
+
+body.dark #online-count {
+    background: var(--bg-input);
+    color: var(--text-muted);
+}
+
+body.dark .message-others .message-content {
+    background: var(--bubble-other-bg);
+    color: var(--bubble-other-text);
+    box-shadow: var(--shadow-sm);
+}
+
+body.dark .message-content.image,
+body.dark .message-content.video {
+    background: var(--bubble-other-bg);
+}
+
+body.dark .message-content.file {
+    background: var(--bubble-other-bg);
+}
+
+body.dark .input-area {
+    background: var(--bg-card);
+    border-top-color: var(--border-color);
+}
+
+body.dark #message-input {
+    background: var(--bg-input);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.dark .toolbar button {
+    background: var(--bg-input);
+}
+
+body.dark .toolbar button:hover {
+    background: var(--border-color);
+}
+
+body.dark .emoji-picker {
+    background: var(--bg-card);
+    box-shadow: var(--shadow-md);
+}
+
+body.dark .reaction-picker {
+    background: var(--bg-card);
+    box-shadow: var(--shadow-md);
+}
+
+body.dark .reaction-tag {
+    background: rgba(102,126,234,0.2);
+    border-color: rgba(102,126,234,0.3);
+    color: var(--text-primary);
+}
+
+body.dark .modal-content {
+    background: var(--bg-card);
+}
+
+body.dark .modal-header {
+    border-bottom-color: var(--border-color);
+}
+
+body.dark .modal-header h3 {
+    color: var(--text-primary);
+}
+
+body.dark .code-block {
+    background: var(--code-bg);
+}
+
+body.dark .reply-quote {
+    background: rgba(102,126,234,0.15);
+    color: var(--text-secondary);
+}
+
+body.dark .private-hint {
+    background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
+}
+
+/* ========== Recalled Message ========== */
+.message-recalled .message-content {
+    color: var(--text-muted) !important;
+    font-style: italic;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.message-recalled .message-header {
+    opacity: 0.5;
+}
+
+.message-recalled .message-actions,
+.message-recalled .reactions-bar {
+    display: none !important;
+}
+
+.recall-btn {
+    color: #ef4444;
+    font-size: 11px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.message:hover .recall-btn {
+    opacity: 0.6;
+}
+
+.recall-btn:hover {
+    opacity: 1 !important;
+    background: rgba(239,68,68,0.1);
 }

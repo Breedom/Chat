@@ -18,6 +18,8 @@ type StoredMessage struct {
 	Content  string `json:"content"`
 	DataType string `json:"data_type,omitempty"`
 	Time     string `json:"time"`
+	MsgID    string `json:"msg_id,omitempty"`
+	Recalled bool   `json:"recalled,omitempty"`
 }
 
 type MessageStore struct {
@@ -66,6 +68,7 @@ func (ms *MessageStore) Append(msg Message) {
 		Content:  msg.Content,
 		DataType: msg.DataType,
 		Time:     time.Now().Format(time.RFC3339),
+		MsgID:    msg.MsgID,
 	}
 
 	ms.mu.Lock()
@@ -75,6 +78,19 @@ func (ms *MessageStore) Append(msg Message) {
 	}
 	ms.mu.Unlock()
 
+	ms.save()
+}
+
+func (ms *MessageStore) Recall(msgID string) {
+	ms.mu.Lock()
+	for i := range ms.messages {
+		if ms.messages[i].MsgID == msgID {
+			ms.messages[i].Recalled = true
+			ms.messages[i].Content = "消息已撤回"
+			break
+		}
+	}
+	ms.mu.Unlock()
 	ms.save()
 }
 

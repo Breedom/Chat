@@ -4,6 +4,8 @@ let privateTarget = null;
 let typingTimeout = null;
 let isTyping = false;
 let replyingTo = null;
+let unreadCount = 0;
+let originalTitle = document.title;
 
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
@@ -110,6 +112,9 @@ function handleMessage(msg) {
             break;
         case 'reaction_update':
             updateReactions(msg.msg_id, JSON.parse(msg.content));
+            break;
+        case 'recall':
+            handleRecall(msg.msg_id);
             break;
     }
 }
@@ -389,6 +394,19 @@ function updateReactions(msgId, reactions) {
     });
 }
 
+function handleRecall(msgId) {
+    const el = document.querySelector(`.message[data-msg-id="${msgId}"]`);
+    if (el) {
+        el.classList.add('message-recalled');
+        const content = el.querySelector('.message-content');
+        if (content) content.textContent = '消息已撤回';
+        const actions = el.querySelector('.message-actions');
+        if (actions) actions.remove();
+        const reactions = el.querySelector('.reactions-bar');
+        if (reactions) reactions.remove();
+    }
+}
+
 if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
 }
@@ -500,3 +518,100 @@ settingsBtn.onclick = () => {
 
 closeModalBtn.onclick = () => { settingsModal.style.display = 'none'; };
 settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.style.display = 'none'; };
+
+// ========== Dark Mode ==========
+const darkModeBtn = document.getElementById('darkmode-btn');
+if (localStorage.getItem('darkMode') === 'true') {
+    document.body.classList.add('dark');
+    darkModeBtn.textContent = '☀️';
+}
+
+darkModeBtn.onclick = () => {
+    document.body.classList.toggle('dark');
+    const isDark = document.body.classList.contains('dark');
+    localStorage.setItem('darkMode', isDark);
+    darkModeBtn.textContent = isDark ? '☀️' : '🌙';
+};
+
+// ========== Export ==========
+const exportBtn = document.getElementById('export-btn');
+exportBtn.onclick = () => {
+    const messages = messagesDiv.querySelectorAll('.message');
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>聊天记录 - ${new Date().toLocaleDateString()}</title>
+    <style>body{font-family:sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5;}
+    .msg{margin:8px 0;padding:10px 14px;background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+    .msg .name{font-weight:600;color:#667eea;font-size:13px;}
+    .msg .time{color:#999;font-size:11px;margin-left:8px;}
+    .msg .content{margin-top:4px;font-size:14px;line-height:1.5;}
+    .sys{text-align:center;color:#999;font-size:12px;margin:12px 0;}</style></head><body>
+    <h2>聊天记录导出</h2><p>导出时间: ${new Date().toLocaleString()}</p><hr>`;
+
+    messages.forEach(msg => {
+        if (msg.classList.contains('message-system')) {
+            html += `<div class="sys">${msg.textContent}</div>`;
+        } else {
+            const name = msg.querySelector('.message-username')?.textContent || '';
+            const time = msg.querySelector('.message-time')?.textContent || '';
+            const content = msg.querySelector('.message-content')?.textContent || '';
+            html += `<div class="msg"><span class="name">${name}</span><span class="time">${time}</span><div class="content">${content}</div></div>`;
+        }
+    });
+
+    html += '</body></html>';
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `chat-export-${new Date().toISOString().slice(0,10)}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+};
+
+// ========== Unread Count ==========
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        unreadCount = 0;
+        document.title = originalTitle;
+    }
+});
+
+function incrementUnread() {
+    if (document.hidden) {
+        unreadCount++;
+        document.title = `(${unreadCount}) ${originalTitle}`;
+    }
+}
+
+// ========== Recall ==========
+function recallMessage(msgId) {
+    if (!confirm('确定撤回这条消息？')) return;
+    ws.send(JSON.stringify({ type: 'recall', username, msg_id: msgId }));
+}
+
+const origAddChatMessage = addChatMessage;
+addChatMessage = function(msg) {
+    if (msg.recalled) {
+        const div = document.createElement('div');
+        div.className = 'message message-recalled message-others';
+        div.dataset.msgId = msg.msg_id;
+        div.innerHTML = `<div class="message-header"><span class="message-username">${escapeHtml(msg.username)}</span></div>
+            <div class="message-content">消息已撤回</div>`;
+        messagesDiv.appendChild(div);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        return;
+    }
+
+    origAddChatMessage(msg);
+    incrementUnread();
+
+    const lastMsg = messagesDiv.lastElementChild;
+    if (lastMsg && lastMsg.dataset.msgId && msg.username === username) {
+        const actions = lastMsg.querySelector('.message-actions');
+        if (actions) {
+            const recallBtn = document.createElement('button');
+            recallBtn.className = 'recall-btn';
+            recallBtn.textContent = '撤回';
+            recallBtn.onclick = () => recallMessage(msg.msg_id);
+            actions.appendChild(recallBtn);
+        }
+    }
+};

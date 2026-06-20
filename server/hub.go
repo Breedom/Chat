@@ -15,6 +15,7 @@ type Message struct {
 	ReplyTo  string            `json:"reply_to,omitempty"`
 	Reaction string            `json:"reaction,omitempty"`
 	MsgID    string            `json:"msg_id,omitempty"`
+	Callback string            `json:"callback,omitempty"`
 }
 
 type Hub struct {
@@ -163,6 +164,20 @@ func (h *Hub) broadcastStopTyping(username string) {
 			case client.send <- data:
 			default:
 			}
+		}
+	}
+	h.mu.RUnlock()
+}
+
+func (h *Hub) sendToUser(username string, data []byte) {
+	h.mu.RLock()
+	for client := range h.clients {
+		if client.username == username {
+			select {
+			case client.send <- data:
+			default:
+			}
+			break
 		}
 	}
 	h.mu.RUnlock()
