@@ -11,11 +11,13 @@ type Message struct {
 	Username string `json:"username"`
 	Content  string `json:"content"`
 	DataType string `json:"data_type,omitempty"`
+	To       string `json:"to,omitempty"`
 }
 
 type Hub struct {
 	clients    map[*Client]bool
 	broadcast  chan []byte
+	private    chan []byte
 	register   chan *Client
 	unregister chan *Client
 	store      *MessageStore
@@ -26,6 +28,7 @@ func NewHub(store *MessageStore) *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
 		broadcast:  make(chan []byte, 256),
+		private:    make(chan []byte, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		store:      store,
@@ -61,6 +64,22 @@ func (h *Hub) Run() {
 				default:
 					close(client.send)
 					delete(h.clients, client)
+				}
+			}
+			h.mu.RUnlock()
+
+		case data := <-h.private:
+			var msg Message
+			if err := json.Unmarshal(data, &msg); err != nil {
+				continue
+			}
+			h.mu.RLock()
+			for client := range h.clients {
+				if client.username == msg.To || client.username == msg.Username {
+					select {
+					case client.send <- data:
+					default:
+					}
 				}
 			}
 			h.mu.RUnlock()
@@ -102,6 +121,80 @@ func (h *Hub) sendUserList() {
 	}
 	data, _ := json.Marshal(msg)
 	h.broadcast <- data
+}
+
+func (h *Hub) sendPrivate(data []byte) {
+	h.private <- data
+}
+
+func (h *Hub) broadcastTyping(username string) {
+	msg := Message{
+		Type:     "typing",
+		Username: username,
+	}
+	data, _ := json.Marshal(msg)
+	h.mu.RLock()
+	for client := range h.clients {
+		if client.username != username {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
+	h.mu.RUnlock()
+}
+
+func (h *Hub) broadcastStopTyping(username string) {
+	msg := Message{
+		Type:     "stop_typing",
+		Username: username,
+	}
+	data, _ := json.Marshal(msg)
+	h.mu.RLock()
+	for client := range h.clients {
+		if client.username != username {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
+	h.mu.RUnlock()
+}
+
+func (h *Hub) notifyMention(content, sender string) {
+	for i := 0; i < len(content)-1; i++ {
+		if content[i] == '@' {
+			name := ""
+			for j := i + 1; j < len(content); j++ {
+				if content[j] == ' ' || content[j] == ',' || content[j] == '.' || content[j] == '\n' {
+					break
+				}
+				name += string(content[j])
+			}
+			if name == "" {
+				continue
+			}
+			msg := Message{
+				Type:     "mention",
+				Username: sender,
+				Content:  name,
+			}
+			data, _ := json.Marshal(msg)
+			h.mu.RLock()
+			for client := range h.clients {
+				if client.username == name {
+					select {
+					case client.send <- data:
+					default:
+					}
+				}
+			}
+			h.mu.RUnlock()
+			i += len(name)
+		}
+	}
 }
 
 func mustMarshal(v interface{}) string {

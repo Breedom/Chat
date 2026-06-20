@@ -1,5 +1,8 @@
 let ws;
 let username;
+let privateTarget = null;
+let typingTimeout = null;
+let isTyping = false;
 
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
@@ -23,6 +26,11 @@ const settingsModal = document.getElementById('settings-modal');
 const closeModalBtn = document.getElementById('close-modal-btn');
 const qrcodeDiv = document.getElementById('qrcode');
 const currentUrlP = document.getElementById('current-url');
+const chatTitle = document.getElementById('chat-title');
+const backBtn = document.getElementById('back-btn');
+const privateHint = document.getElementById('private-hint');
+const privateTargetSpan = document.getElementById('private-target');
+const typingIndicator = document.getElementById('typing-indicator');
 
 const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘',
     '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐',
@@ -86,7 +94,10 @@ function connectWebSocket() {
 function handleMessage(msg) {
     switch (msg.type) {
         case 'message':
-            addChatMessage(msg);
+            if (!privateTarget) addChatMessage(msg);
+            break;
+        case 'private':
+            addPrivateMessage(msg);
             break;
         case 'history':
             loadHistory(JSON.parse(msg.content));
@@ -97,25 +108,87 @@ function handleMessage(msg) {
         case 'system':
             addSystemMessage(msg.content);
             break;
+        case 'typing':
+            showTyping(msg.username);
+            break;
+        case 'stop_typing':
+            hideTyping(msg.username);
+            break;
+        case 'mention':
+            showMentionNotification(msg.username, msg.content);
+            break;
     }
 }
 
 function loadHistory(msgs) {
     msgs.forEach(m => {
-        addChatMessage({
-            type: 'message',
-            username: m.username,
-            content: m.content,
-            data_type: m.data_type,
-            time: m.time
-        });
+        if (m.type === 'private') {
+            if (privateTarget && (m.to === privateTarget || m.username === privateTarget)) {
+                addPrivateMessage(m);
+            }
+        } else {
+            if (!privateTarget) addChatMessage(m);
+        }
     });
     if (msgs.length > 0) {
         addSystemMessage(`已加载 ${msgs.length} 条历史消息`);
     }
 }
 
+function highlightMentions(text) {
+    return escapeHtml(text).replace(/@(\S+)/g, '<span class="mention">@$1</span>');
+}
+
 function addChatMessage(msg) {
+    const div = document.createElement('div');
+    const isSelf = msg.username === username;
+    div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
+
+    const time = msg.time
+        ? new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        : new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+    let contentHTML = '';
+    if (msg.data_type === 'image') {
+        contentHTML = `
+            <div class="message-content image">
+                <img src="${msg.content}" onclick="previewImage(this.src)" loading="lazy">
+            </div>`;
+    } else if (msg.data_type === 'video') {
+        contentHTML = `
+            <div class="message-content video">
+                <video src="${msg.content}" controls preload="metadata" playsinline></video>
+            </div>`;
+    } else if (msg.data_type === 'file') {
+        const fileInfo = JSON.parse(msg.content);
+        contentHTML = `
+            <div class="message-content file">
+                <span class="file-icon">📄</span>
+                <div class="file-info">
+                    <div class="file-name">${escapeHtml(fileInfo.name)}</div>
+                    <div class="file-size">${formatFileSize(fileInfo.size)}</div>
+                </div>
+                <a href="${fileInfo.url}" class="file-download" download>下载</a>
+            </div>`;
+    } else {
+        contentHTML = `<div class="message-content">${highlightMentions(msg.content)}</div>`;
+    }
+
+    div.innerHTML = `
+        <div class="message-header">
+            <span class="message-username">${escapeHtml(msg.username)}</span>
+            <span class="message-time">${time}</span>
+        </div>
+        ${contentHTML}`;
+
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function addPrivateMessage(msg) {
+    const peer = msg.username === username ? msg.to : msg.username;
+    if (privateTarget !== peer) return;
+
     const div = document.createElement('div');
     const isSelf = msg.username === username;
     div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
@@ -177,22 +250,49 @@ function updateUserList(users) {
         if (user === username) {
             li.style.background = 'rgba(102, 126, 234, 0.3)';
         }
+        if (user !== username) {
+            li.style.cursor = 'pointer';
+            li.onclick = () => startPrivateChat(user);
+        }
         userList.appendChild(li);
     });
     onlineCount.textContent = `${users.length} 人在线`;
 }
 
+function startPrivateChat(target) {
+    privateTarget = target;
+    chatTitle.textContent = `私聊 - ${target}`;
+    backBtn.style.display = 'inline-block';
+    privateHint.style.display = 'flex';
+    privateTargetSpan.textContent = target;
+    messagesDiv.innerHTML = '';
+    addSystemMessage(`已切换到与 ${target} 的私聊`);
+}
+
+backBtn.onclick = () => {
+    privateTarget = null;
+    chatTitle.textContent = '公共聊天室';
+    backBtn.style.display = 'none';
+    privateHint.style.display = 'none';
+    messagesDiv.innerHTML = '';
+    addSystemMessage('已返回公共聊天室');
+};
+
 function sendMessage() {
     const content = messageInput.value.trim();
     if (!content || !ws) return;
 
-    ws.send(JSON.stringify({
-        type: 'message',
+    const msg = {
+        type: privateTarget ? 'private' : 'message',
         username: username,
         content: content
-    }));
+    };
+    if (privateTarget) msg.to = privateTarget;
+
+    ws.send(JSON.stringify(msg));
 
     messageInput.value = '';
+    sendStopTyping();
 }
 
 sendBtn.onclick = sendMessage;
@@ -202,6 +302,46 @@ messageInput.onkeypress = (e) => {
         sendMessage();
     }
 };
+
+messageInput.oninput = () => {
+    if (!isTyping) {
+        isTyping = true;
+        ws.send(JSON.stringify({ type: 'typing', username: username }));
+    }
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => sendStopTyping(), 2000);
+};
+
+function sendStopTyping() {
+    if (isTyping) {
+        isTyping = false;
+        ws.send(JSON.stringify({ type: 'stop_typing', username: username }));
+    }
+}
+
+function showTyping(user) {
+    typingIndicator.textContent = `${user} 正在输入...`;
+    typingIndicator.style.display = 'block';
+}
+
+function hideTyping(user) {
+    if (typingIndicator.textContent === `${user} 正在输入...`) {
+        typingIndicator.style.display = 'none';
+    }
+}
+
+function showMentionNotification(from, to) {
+    if (to === username) {
+        addSystemMessage(`${from} 提到了你`);
+        if (Notification.permission === 'granted') {
+            new Notification(`${from} 提到了你`, { body: '在聊天室中' });
+        }
+    }
+}
+
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
 
 emojiBtn.onclick = (e) => {
     e.stopPropagation();
@@ -251,12 +391,15 @@ async function uploadAndSendVideo(file) {
 
         const result = await response.json();
 
-        ws.send(JSON.stringify({
-            type: 'message',
+        const msg = {
+            type: privateTarget ? 'private' : 'message',
             username: username,
             content: result.url,
             data_type: 'video'
-        }));
+        };
+        if (privateTarget) msg.to = privateTarget;
+
+        ws.send(JSON.stringify(msg));
     } catch (error) {
         alert('上传失败: ' + error.message);
     }
@@ -278,8 +421,8 @@ fileInput.onchange = async (e) => {
 
         const result = await response.json();
 
-        ws.send(JSON.stringify({
-            type: 'message',
+        const msg = {
+            type: privateTarget ? 'private' : 'message',
             username: username,
             content: JSON.stringify({
                 url: result.url,
@@ -287,7 +430,10 @@ fileInput.onchange = async (e) => {
                 size: file.size
             }),
             data_type: 'file'
-        }));
+        };
+        if (privateTarget) msg.to = privateTarget;
+
+        ws.send(JSON.stringify(msg));
     } catch (error) {
         alert('上传失败: ' + error.message);
     }
@@ -350,12 +496,15 @@ async function uploadAndSendImage(file) {
 
         const result = await response.json();
 
-        ws.send(JSON.stringify({
-            type: 'message',
+        const msg = {
+            type: privateTarget ? 'private' : 'message',
             username: username,
             content: result.url,
             data_type: 'image'
-        }));
+        };
+        if (privateTarget) msg.to = privateTarget;
+
+        ws.send(JSON.stringify(msg));
     } catch (error) {
         alert('上传失败: ' + error.message);
     }

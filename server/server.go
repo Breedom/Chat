@@ -127,8 +127,25 @@ func (s *Server) handleFileServer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBroadcast(data []byte) {
 	var msg Message
-	if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "message" {
-		s.store.Append(msg)
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
 	}
-	s.hub.broadcast <- data
+
+	switch msg.Type {
+	case "message":
+		s.store.Append(msg)
+		s.hub.broadcast <- data
+		if strings.Contains(msg.Content, "@") {
+			s.hub.notifyMention(msg.Content, msg.Username)
+		}
+	case "private":
+		s.store.Append(msg)
+		s.hub.sendPrivate(data)
+	case "typing":
+		s.hub.broadcastTyping(msg.Username)
+	case "stop_typing":
+		s.hub.broadcastStopTyping(msg.Username)
+	default:
+		s.hub.broadcast <- data
+	}
 }

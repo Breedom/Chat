@@ -22,11 +22,19 @@
         </div>
         <div class="main">
             <div class="header">
-                <h2>公共聊天室</h2>
+                <div class="header-left">
+                    <h2 id="chat-title">公共聊天室</h2>
+                    <button id="back-btn" class="back-btn" style="display: none;" title="返回公共频道">← 返回</button>
+                </div>
                 <span id="online-count">0 人在线</span>
             </div>
             <div id="messages" class="messages"></div>
+            <div id="typing-indicator" class="typing-indicator" style="display: none;"></div>
             <div class="input-area">
+                <div id="private-hint" class="private-hint" style="display: none;">
+                    <span>私聊中</span>
+                    <span id="private-target"></span>
+                </div>
                 <div class="toolbar">
                     <button id="emoji-btn" title="表情">😀</button>
                     <button id="image-btn" title="发送图片">🖼️</button>
