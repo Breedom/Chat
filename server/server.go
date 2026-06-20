@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -47,6 +48,8 @@ func (s *Server) Start() error {
 
 	http.HandleFunc("/ws", s.handleWebSocket)
 	http.HandleFunc("/upload", s.handleUpload)
+	http.HandleFunc("/upload-chunk", s.handleUploadChunk)
+	http.HandleFunc("/upload-complete", s.handleUploadComplete)
 	http.HandleFunc("/files/", s.handleFileServer)
 	http.HandleFunc("/", s.handleStatic)
 
@@ -123,6 +126,89 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFileServer(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix("/files/", http.FileServer(http.Dir(s.uploadDir))).ServeHTTP(w, r)
+}
+
+func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseMultipartForm(64 << 20)
+
+	uploadID := r.FormValue("upload_id")
+	chunkIndex := r.FormValue("chunk_index")
+	totalChunks := r.FormValue("total_chunks")
+	filename := r.FormValue("filename")
+	user := r.FormValue("username")
+
+	file, _, err := r.FormFile("chunk")
+	if err != nil {
+		http.Error(w, "Error reading chunk", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	chunkDir := filepath.Join(s.uploadDir, "chunks", uploadID)
+	os.MkdirAll(chunkDir, 0755)
+	chunkPath := filepath.Join(chunkDir, chunkIndex)
+
+	dst, err := createFile(chunkPath)
+	if err != nil {
+		http.Error(w, "Error saving chunk", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+	copyFile(dst, file)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf(`{"ok":true,"chunk":"%s","total":"%s"}`, chunkIndex, totalChunks)))
+	_ = user
+	_ = filename
+}
+
+func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseMultipartForm(4096)
+
+	uploadID := r.FormValue("upload_id")
+	filename := r.FormValue("filename")
+	user := r.FormValue("username")
+	totalChunks := 0
+	fmt.Sscanf(r.FormValue("total_chunks"), "%d", &totalChunks)
+
+	chunkDir := filepath.Join(s.uploadDir, "chunks", uploadID)
+	defer os.RemoveAll(chunkDir)
+
+	finalName := fmt.Sprintf("%s_%s", user, filename)
+	finalPath := filepath.Join(s.uploadDir, finalName)
+
+	dst, err := createFile(finalPath)
+	if err != nil {
+		http.Error(w, "Error creating file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	for i := 0; i < totalChunks; i++ {
+		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%d", i))
+		data, err := os.ReadFile(chunkPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Missing chunk %d", i), http.StatusInternalServerError)
+			return
+		}
+		dst.Write(data)
+	}
+
+	fileURL := fmt.Sprintf("/files/%s", finalName)
+	ext := strings.ToLower(filepath.Ext(filename))
+	isVideo := videoExts[ext]
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := fmt.Sprintf(`{"url":"%s","name":"%s","video":%t}`, fileURL, filename, isVideo)
+	w.Write([]byte(resp))
 }
 
 func (s *Server) handleBroadcast(data []byte) {

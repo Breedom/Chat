@@ -153,6 +153,25 @@ function renderContent(msg, isSelf) {
     }
     if (msg.data_type === 'file') {
         const fi = JSON.parse(msg.content);
+        const ext = fi.name.split('.').pop().toLowerCase();
+        const isPdf = ext === 'pdf';
+        const codeExts = ['js','ts','py','go','java','c','cpp','h','css','html','json','xml','yaml','yml','md','sh','bat','sql','rb','rs','swift','kt'];
+        const isCode = codeExts.includes(ext);
+
+        let previewHTML = '';
+        if (isPdf) {
+            previewHTML = `<div class="pdf-preview">
+                <iframe src="${fi.url}"></iframe>
+                <a href="${fi.url}" class="pdf-link" target="_blank">在新窗口打开 PDF</a>
+            </div>`;
+        } else if (isCode && fi.size < 100000) {
+            previewHTML = `<div class="code-preview" data-url="${fi.url}" data-ext="${ext}">
+                <div class="code-filename">${escapeHtml(fi.name)}</div>
+                <pre><code>加载中...</code></pre>
+            </div>`;
+            setTimeout(() => loadCodePreview(fi.url, ext), 100);
+        }
+
         return `<div class="message-content file">
             <span class="file-icon">📄</span>
             <div class="file-info">
@@ -160,9 +179,23 @@ function renderContent(msg, isSelf) {
                 <div class="file-size">${formatFileSize(fi.size)}</div>
             </div>
             <a href="${fi.url}" class="file-download" download>下载</a>
-        </div>`;
+        </div>${previewHTML}`;
     }
     return `<div class="message-content">${formatText(msg.content, isSelf)}</div>`;
+}
+
+async function loadCodePreview(url, ext) {
+    try {
+        const resp = await fetch(url);
+        const text = await resp.text();
+        const el = document.querySelector(`.code-preview[data-url="${url}"]`);
+        if (el) {
+            const code = el.querySelector('code');
+            code.textContent = text.slice(0, 5000);
+            code.className = `language-${ext}`;
+            hljs.highlightElement(code);
+        }
+    } catch (e) {}
 }
 
 function formatText(text, isSelf) {
@@ -424,7 +457,8 @@ imageInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('请选择图片文件'); return; }
-    await uploadAndSend(file, 'image');
+    const compressed = await compressImage(file, 0.8, 1920);
+    await smartUpload(compressed, 'image');
     imageInput.value = '';
 };
 
@@ -432,18 +466,59 @@ videoInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith('video/')) { alert('请选择视频文件'); return; }
-    await uploadAndSend(file, 'video');
+    await smartUpload(file, 'video');
     videoInput.value = '';
 };
 
 fileInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    await uploadAndSend(file, 'file');
+    await smartUpload(file, 'file');
     fileInput.value = '';
 };
 
-async function uploadAndSend(file, dataType) {
+// ========== Image Compression ==========
+function compressImage(file, quality, maxDim) {
+    return new Promise((resolve) => {
+        if (file.size < 200 * 1024) { resolve(file); return; }
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            canvas.toBlob((blob) => {
+                if (blob && blob.size < file.size) {
+                    resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+                } else {
+                    resolve(file);
+                }
+            }, 'image/jpeg', quality);
+        };
+        img.src = url;
+    });
+}
+
+// ========== Smart Upload (chunked for large files) ==========
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
+
+async function smartUpload(file, dataType) {
+    if (file.size > CHUNK_SIZE * 2) {
+        await chunkedUpload(file, dataType);
+    } else {
+        await simpleUpload(file, dataType);
+    }
+}
+
+async function simpleUpload(file, dataType) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('username', username);
@@ -451,22 +526,91 @@ async function uploadAndSend(file, dataType) {
     try {
         const response = await fetch('/upload', { method: 'POST', body: formData });
         const result = await response.json();
-        const msg = {
-            type: privateTarget ? 'private' : 'message',
-            username,
-            data_type: dataType,
-            msg_id: generateMsgId()
-        };
-        if (privateTarget) msg.to = privateTarget;
-        if (dataType === 'file') {
-            msg.content = JSON.stringify({ url: result.url, name: file.name, size: file.size });
-        } else {
-            msg.content = result.url;
-        }
-        ws.send(JSON.stringify(msg));
+        sendFileMessage(result, file, dataType);
     } catch (error) {
         alert('上传失败: ' + error.message);
     }
+}
+
+async function chunkedUpload(file, dataType) {
+    const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const progressId = 'upload-' + uploadId;
+
+    showUploadProgress(progressId, file.name, 0);
+
+    try {
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+
+            const formData = new FormData();
+            formData.append('chunk', chunk);
+            formData.append('upload_id', uploadId);
+            formData.append('chunk_index', i.toString());
+            formData.append('total_chunks', totalChunks.toString());
+            formData.append('filename', file.name);
+            formData.append('username', username);
+
+            await fetch('/upload-chunk', { method: 'POST', body: formData });
+            updateUploadProgress(progressId, (i + 1) / totalChunks);
+        }
+
+        const formData = new FormData();
+        formData.append('upload_id', uploadId);
+        formData.append('filename', file.name);
+        formData.append('username', username);
+        formData.append('total_chunks', totalChunks.toString());
+
+        const response = await fetch('/upload-complete', { method: 'POST', body: formData });
+        const result = await response.json();
+        hideUploadProgress(progressId);
+        sendFileMessage(result, file, dataType);
+    } catch (error) {
+        hideUploadProgress(progressId);
+        alert('上传失败: ' + error.message);
+    }
+}
+
+function sendFileMessage(result, file, dataType) {
+    const msg = {
+        type: privateTarget ? 'private' : 'message',
+        username,
+        data_type: dataType,
+        msg_id: generateMsgId()
+    };
+    if (privateTarget) msg.to = privateTarget;
+    if (dataType === 'file') {
+        msg.content = JSON.stringify({ url: result.url, name: file.name, size: file.size });
+    } else {
+        msg.content = result.url;
+    }
+    ws.send(JSON.stringify(msg));
+}
+
+// ========== Upload Progress ==========
+function showUploadProgress(id, filename, pct) {
+    const div = document.createElement('div');
+    div.id = id;
+    div.className = 'upload-progress';
+    div.innerHTML = `<div class="upload-info">上传中: ${escapeHtml(filename)}</div>
+        <div class="upload-bar"><div class="upload-fill" style="width:${pct * 100}%"></div></div>`;
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function updateUploadProgress(id, pct) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.querySelector('.upload-fill').style.width = `${pct * 100}%`;
+        el.querySelector('.upload-info').textContent = `上传中: ${Math.round(pct * 100)}%`;
+    }
+}
+
+function hideUploadProgress(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
 }
 
 function escapeHtml(text) {
@@ -502,7 +646,9 @@ document.addEventListener('paste', async (e) => {
     for (let item of items) {
         if (item.type.startsWith('image/')) {
             e.preventDefault();
-            await uploadAndSend(item.getAsFile(), 'image');
+            const file = item.getAsFile();
+            const compressed = await compressImage(file, 0.8, 1920);
+            await smartUpload(compressed, 'image');
             break;
         }
     }
