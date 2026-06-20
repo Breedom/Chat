@@ -275,9 +275,12 @@ body {
     padding: 12px 18px;
     border-radius: 18px;
     word-wrap: break-word;
+    overflow-wrap: break-word;
     line-height: 1.5;
     font-size: 14px;
     position: relative;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .message-others .message-content {
@@ -744,10 +747,13 @@ body {
     overflow-x: auto;
     font-size: 13px;
     line-height: 1.5;
+    white-space: pre;
+    word-wrap: normal;
 }
 
 .code-block code {
     font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+    white-space: pre;
 }
 
 .inline-code {

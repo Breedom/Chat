@@ -200,11 +200,11 @@ async function loadCodePreview(url, ext) {
 
 function formatText(text, isSelf) {
     let html = highlightMentions(text);
-    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    html = html.replace(/```(\w*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
         const langLabel = lang || 'plaintext';
         return `<div class="code-block"><div class="code-lang">${langLabel}</div><pre><code class="language-${langLabel}">${code.trim()}</code></pre></div>`;
     });
-    html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    html = html.replace(/`([^`\r\n]+)`/g, '<code class="inline-code">$1</code>');
     return html;
 }
 
