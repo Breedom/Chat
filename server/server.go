@@ -1,8 +1,13 @@
 package server
 
 import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +16,19 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var hmacKey = []byte("chat-room-secret-2024")
+
+func generateToken(username string) string {
+	mac := hmac.New(sha256.New, hmacKey)
+	mac.Write([]byte(username))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func validateToken(token, username string) bool {
+	expected := generateToken(username)
+	return hmac.Equal([]byte(token), []byte(expected))
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -24,12 +42,20 @@ var videoExts = map[string]bool{
 	".mp4": true, ".webm": true, ".ogg": true, ".mov": true, ".avi": true, ".mkv": true,
 }
 
+var allowedExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".bmp": true,
+	".mp4": true, ".webm": true, ".ogg": true, ".mov": true, ".avi": true, ".mkv": true,
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".ppt": true, ".pptx": true,
+	".txt": true, ".md": true, ".zip": true, ".rar": true,
+}
+
 type Server struct {
 	hub       *Hub
 	addr      string
 	staticDir string
 	uploadDir string
 	store     *MessageStore
+	httpServer *http.Server
 }
 
 func NewServer(addr, staticDir, uploadDir string) *Server {
@@ -45,6 +71,7 @@ func NewServer(addr, staticDir, uploadDir string) *Server {
 
 func (s *Server) Start() error {
 	go s.hub.Run()
+	go s.store.StartFlusher()
 
 	http.HandleFunc("/ws", s.handleWebSocket)
 	http.HandleFunc("/upload", s.handleUpload)
@@ -53,13 +80,26 @@ func (s *Server) Start() error {
 	http.HandleFunc("/files/", s.handleFileServer)
 	http.HandleFunc("/", s.handleStatic)
 
-	return http.ListenAndServe(s.addr, nil)
+	s.httpServer = &http.Server{Addr: s.addr}
+	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) Stop() {
+	if s.httpServer != nil {
+		s.httpServer.Shutdown(context.Background())
+	}
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	if username == "" {
 		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if token == "" || !validateToken(token, username) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -78,6 +118,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GET %s", r.URL.Path)
 	if r.URL.Path == "/" {
 		http.ServeFile(w, r, filepath.Join(s.staticDir, "index.html"))
 		return
@@ -100,23 +141,38 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	filename := fmt.Sprintf("%s_%s", r.FormValue("username"), handler.Filename)
+	// 检查文件扩展名白名单
+	ext := strings.ToLower(filepath.Ext(handler.Filename))
+	if !allowedExts[ext] {
+		http.Error(w, "File type not allowed", http.StatusBadRequest)
+		return
+	}
+
+	// 安全清理文件名，防止路径穿越
+	cleanName := filepath.Base(handler.Filename)
+	cleanName = strings.ReplaceAll(cleanName, "/", "")
+	cleanName = strings.ReplaceAll(cleanName, "\\", "")
+	if cleanName == "." || cleanName == ".." || cleanName == "" {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	filename := fmt.Sprintf("%s_%s", r.FormValue("username"), cleanName)
 	savePath := filepath.Join(s.uploadDir, filename)
 
-	dst, err := createFile(savePath)
+	dst, err := os.Create(savePath)
 	if err != nil {
 		http.Error(w, "Error saving file", http.StatusInternalServerError)
 		return
 	}
 	defer dst.Close()
 
-	if _, err := copyFile(dst, file); err != nil {
+	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, "Error saving file", http.StatusInternalServerError)
 		return
 	}
 
 	fileURL := fmt.Sprintf("/files/%s", filename)
-	ext := strings.ToLower(filepath.Ext(handler.Filename))
 	isVideo := videoExts[ext]
 
 	w.Header().Set("Content-Type", "application/json")
@@ -152,13 +208,16 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(chunkDir, 0755)
 	chunkPath := filepath.Join(chunkDir, chunkIndex)
 
-	dst, err := createFile(chunkPath)
+	dst, err := os.Create(chunkPath)
 	if err != nil {
 		http.Error(w, "Error saving chunk", http.StatusInternalServerError)
 		return
 	}
 	defer dst.Close()
-	copyFile(dst, file)
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "Error saving chunk", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(fmt.Sprintf(`{"ok":true,"chunk":"%s","total":"%s"}`, chunkIndex, totalChunks)))
@@ -185,7 +244,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	finalName := fmt.Sprintf("%s_%s", user, filename)
 	finalPath := filepath.Join(s.uploadDir, finalName)
 
-	dst, err := createFile(finalPath)
+	dst, err := os.Create(finalPath)
 	if err != nil {
 		http.Error(w, "Error creating file", http.StatusInternalServerError)
 		return
@@ -199,7 +258,10 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Missing chunk %d", i), http.StatusInternalServerError)
 			return
 		}
-		dst.Write(data)
+		if _, err := dst.Write(data); err != nil {
+			http.Error(w, fmt.Sprintf("Error writing chunk %d", i), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	fileURL := fmt.Sprintf("/files/%s", finalName)
@@ -234,6 +296,10 @@ func (s *Server) handleBroadcast(data []byte) {
 	case "reaction":
 		s.hub.handleReaction(msg)
 	case "recall":
+		original := s.store.GetMessage(msg.MsgID)
+		if original == nil || original.Username != msg.Username {
+			return
+		}
 		s.store.Recall(msg.MsgID)
 		s.hub.broadcast <- data
 	case "export":
