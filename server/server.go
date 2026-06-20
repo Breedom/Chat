@@ -145,6 +145,8 @@ func (s *Server) handleBroadcast(data []byte) {
 		s.hub.broadcastTyping(msg.Username)
 	case "stop_typing":
 		s.hub.broadcastStopTyping(msg.Username)
+	case "reaction":
+		s.hub.handleReaction(msg)
 	default:
 		s.hub.broadcast <- data
 	}

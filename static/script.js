@@ -3,6 +3,7 @@ let username;
 let privateTarget = null;
 let typingTimeout = null;
 let isTyping = false;
+let replyingTo = null;
 
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
@@ -38,6 +39,8 @@ const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', 
     '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👋', '🤚', '✋', '🖖', '👏', '🙌', '👐', '🤲',
     '❤️', '🔥', '💯', '🎉', '🎊', '✅', '⭐', '🌟', '💪', '🙏', '💕', '💗', '💖', '💝', '🤔', '😮'];
 
+const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+
 emojis.forEach(emoji => {
     const span = document.createElement('span');
     span.className = 'emoji-item';
@@ -61,10 +64,8 @@ function joinChat() {
         alert('请输入昵称');
         return;
     }
-
     loginScreen.style.display = 'none';
     chatScreen.style.display = 'flex';
-
     connectWebSocket();
 }
 
@@ -72,23 +73,13 @@ function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/ws?username=${encodeURIComponent(username)}`);
 
-    ws.onopen = () => {
-        addSystemMessage('已连接到聊天室');
-    };
-
-    ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        handleMessage(msg);
-    };
-
+    ws.onopen = () => addSystemMessage('已连接到聊天室');
+    ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
     ws.onclose = () => {
         addSystemMessage('连接已断开，3秒后尝试重连...');
         setTimeout(connectWebSocket, 3000);
     };
-
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-    };
+    ws.onerror = (error) => console.error('WebSocket error:', error);
 }
 
 function handleMessage(msg) {
@@ -117,6 +108,9 @@ function handleMessage(msg) {
         case 'mention':
             showMentionNotification(msg.username, msg.content);
             break;
+        case 'reaction_update':
+            updateReactions(msg.msg_id, JSON.parse(msg.content));
+            break;
     }
 }
 
@@ -130,59 +124,89 @@ function loadHistory(msgs) {
             if (!privateTarget) addChatMessage(m);
         }
     });
-    if (msgs.length > 0) {
-        addSystemMessage(`已加载 ${msgs.length} 条历史消息`);
-    }
+    if (msgs.length > 0) addSystemMessage(`已加载 ${msgs.length} 条历史消息`);
+}
+
+function generateMsgId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
 function highlightMentions(text) {
     return escapeHtml(text).replace(/@(\S+)/g, '<span class="mention">@$1</span>');
 }
 
+function renderContent(msg, isSelf) {
+    if (msg.data_type === 'image') {
+        return `<div class="message-content image">
+            <img src="${msg.content}" onclick="previewImage(this.src)" loading="lazy">
+        </div>`;
+    }
+    if (msg.data_type === 'video') {
+        return `<div class="message-content video">
+            <video src="${msg.content}" controls preload="metadata" playsinline></video>
+        </div>`;
+    }
+    if (msg.data_type === 'file') {
+        const fi = JSON.parse(msg.content);
+        return `<div class="message-content file">
+            <span class="file-icon">📄</span>
+            <div class="file-info">
+                <div class="file-name">${escapeHtml(fi.name)}</div>
+                <div class="file-size">${formatFileSize(fi.size)}</div>
+            </div>
+            <a href="${fi.url}" class="file-download" download>下载</a>
+        </div>`;
+    }
+    return `<div class="message-content">${formatText(msg.content, isSelf)}</div>`;
+}
+
+function formatText(text, isSelf) {
+    let html = highlightMentions(text);
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        const langLabel = lang || 'plaintext';
+        return `<div class="code-block"><div class="code-lang">${langLabel}</div><pre><code class="language-${langLabel}">${code.trim()}</code></pre></div>`;
+    });
+    html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    return html;
+}
+
 function addChatMessage(msg) {
     const div = document.createElement('div');
     const isSelf = msg.username === username;
+    const msgId = msg.msg_id || generateMsgId();
     div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
+    div.dataset.msgId = msgId;
 
     const time = msg.time
         ? new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         : new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
-    let contentHTML = '';
-    if (msg.data_type === 'image') {
-        contentHTML = `
-            <div class="message-content image">
-                <img src="${msg.content}" onclick="previewImage(this.src)" loading="lazy">
-            </div>`;
-    } else if (msg.data_type === 'video') {
-        contentHTML = `
-            <div class="message-content video">
-                <video src="${msg.content}" controls preload="metadata" playsinline></video>
-            </div>`;
-    } else if (msg.data_type === 'file') {
-        const fileInfo = JSON.parse(msg.content);
-        contentHTML = `
-            <div class="message-content file">
-                <span class="file-icon">📄</span>
-                <div class="file-info">
-                    <div class="file-name">${escapeHtml(fileInfo.name)}</div>
-                    <div class="file-size">${formatFileSize(fileInfo.size)}</div>
-                </div>
-                <a href="${fileInfo.url}" class="file-download" download>下载</a>
-            </div>`;
-    } else {
-        contentHTML = `<div class="message-content">${highlightMentions(msg.content)}</div>`;
+    let replyHTML = '';
+    if (msg.reply_to) {
+        replyHTML = `<div class="reply-quote" data-ref="${msg.reply_to}">引用消息</div>`;
     }
+
+    let contentHTML = renderContent(msg, isSelf);
+    let reactionsHTML = `<div class="reactions-bar" data-msg-id="${msgId}"></div>`;
+    let actionsHTML = `<div class="message-actions">
+        <button class="action-btn react-btn" title="回应" onclick="toggleReactionPicker(this)">😀</button>
+        <button class="action-btn reply-btn" title="回复" onclick="startReply('${msgId}','${escapeHtml(msg.username)}')">↩</button>
+    </div>`;
 
     div.innerHTML = `
         <div class="message-header">
             <span class="message-username">${escapeHtml(msg.username)}</span>
             <span class="message-time">${time}</span>
         </div>
-        ${contentHTML}`;
+        ${replyHTML}
+        ${contentHTML}
+        ${reactionsHTML}
+        ${actionsHTML}`;
 
     messagesDiv.appendChild(div);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    div.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
 }
 
 function addPrivateMessage(msg) {
@@ -197,31 +221,7 @@ function addPrivateMessage(msg) {
         ? new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         : new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
-    let contentHTML = '';
-    if (msg.data_type === 'image') {
-        contentHTML = `
-            <div class="message-content image">
-                <img src="${msg.content}" onclick="previewImage(this.src)" loading="lazy">
-            </div>`;
-    } else if (msg.data_type === 'video') {
-        contentHTML = `
-            <div class="message-content video">
-                <video src="${msg.content}" controls preload="metadata" playsinline></video>
-            </div>`;
-    } else if (msg.data_type === 'file') {
-        const fileInfo = JSON.parse(msg.content);
-        contentHTML = `
-            <div class="message-content file">
-                <span class="file-icon">📄</span>
-                <div class="file-info">
-                    <div class="file-name">${escapeHtml(fileInfo.name)}</div>
-                    <div class="file-size">${formatFileSize(fileInfo.size)}</div>
-                </div>
-                <a href="${fileInfo.url}" class="file-download" download>下载</a>
-            </div>`;
-    } else {
-        contentHTML = `<div class="message-content">${escapeHtml(msg.content)}</div>`;
-    }
+    let contentHTML = renderContent(msg, isSelf);
 
     div.innerHTML = `
         <div class="message-header">
@@ -278,6 +278,12 @@ backBtn.onclick = () => {
     addSystemMessage('已返回公共聊天室');
 };
 
+function startReply(msgId, sender) {
+    replyingTo = msgId;
+    messageInput.placeholder = `回复 ${sender}...`;
+    messageInput.focus();
+}
+
 function sendMessage() {
     const content = messageInput.value.trim();
     if (!content || !ws) return;
@@ -285,12 +291,17 @@ function sendMessage() {
     const msg = {
         type: privateTarget ? 'private' : 'message',
         username: username,
-        content: content
+        content: content,
+        msg_id: generateMsgId()
     };
     if (privateTarget) msg.to = privateTarget;
+    if (replyingTo) {
+        msg.reply_to = replyingTo;
+        replyingTo = null;
+        messageInput.placeholder = '输入消息...';
+    }
 
     ws.send(JSON.stringify(msg));
-
     messageInput.value = '';
     sendStopTyping();
 }
@@ -306,16 +317,16 @@ messageInput.onkeypress = (e) => {
 messageInput.oninput = () => {
     if (!isTyping) {
         isTyping = true;
-        ws.send(JSON.stringify({ type: 'typing', username: username }));
+        ws.send(JSON.stringify({ type: 'typing', username }));
     }
     clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => sendStopTyping(), 2000);
+    typingTimeout = setTimeout(sendStopTyping, 2000);
 };
 
 function sendStopTyping() {
     if (isTyping) {
         isTyping = false;
-        ws.send(JSON.stringify({ type: 'stop_typing', username: username }));
+        ws.send(JSON.stringify({ type: 'stop_typing', username }));
     }
 }
 
@@ -339,6 +350,45 @@ function showMentionNotification(from, to) {
     }
 }
 
+function toggleReactionPicker(btn) {
+    const existing = btn.parentElement.querySelector('.reaction-picker');
+    if (existing) { existing.remove(); return; }
+
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker';
+    quickReactions.forEach(emoji => {
+        const span = document.createElement('span');
+        span.className = 'reaction-emoji';
+        span.textContent = emoji;
+        span.onclick = (e) => {
+            e.stopPropagation();
+            const msgId = btn.closest('.message').dataset.msgId;
+            ws.send(JSON.stringify({ type: 'reaction', username, msg_id: msgId, reaction: emoji }));
+            picker.remove();
+        };
+        picker.appendChild(span);
+    });
+    btn.parentElement.appendChild(picker);
+    setTimeout(() => document.addEventListener('click', () => picker.remove(), { once: true }), 10);
+}
+
+function updateReactions(msgId, reactions) {
+    const bar = document.querySelector(`.reactions-bar[data-msg-id="${msgId}"]`);
+    if (!bar) return;
+    bar.innerHTML = '';
+    const counts = {};
+    Object.values(reactions).forEach(emoji => { counts[emoji] = (counts[emoji] || 0) + 1; });
+    Object.entries(counts).forEach(([emoji, count]) => {
+        const span = document.createElement('span');
+        span.className = 'reaction-tag';
+        span.textContent = `${emoji} ${count}`;
+        span.onclick = () => {
+            ws.send(JSON.stringify({ type: 'reaction', username, msg_id: msgId, reaction: emoji }));
+        };
+        bar.appendChild(span);
+    });
+}
+
 if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
 }
@@ -355,91 +405,51 @@ fileBtn.onclick = () => fileInput.click();
 imageInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-        alert('请选择图片文件');
-        return;
-    }
-
-    await uploadAndSendImage(file);
+    if (!file.type.startsWith('image/')) { alert('请选择图片文件'); return; }
+    await uploadAndSend(file, 'image');
     imageInput.value = '';
 };
 
 videoInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (!file.type.startsWith('video/')) {
-        alert('请选择视频文件');
-        return;
-    }
-
-    await uploadAndSendVideo(file);
+    if (!file.type.startsWith('video/')) { alert('请选择视频文件'); return; }
+    await uploadAndSend(file, 'video');
     videoInput.value = '';
 };
 
-async function uploadAndSendVideo(file) {
+fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    await uploadAndSend(file, 'file');
+    fileInput.value = '';
+};
+
+async function uploadAndSend(file, dataType) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('username', username);
 
     try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-
+        const response = await fetch('/upload', { method: 'POST', body: formData });
         const result = await response.json();
-
         const msg = {
             type: privateTarget ? 'private' : 'message',
-            username: username,
-            content: result.url,
-            data_type: 'video'
+            username,
+            data_type: dataType,
+            msg_id: generateMsgId()
         };
         if (privateTarget) msg.to = privateTarget;
-
+        if (dataType === 'file') {
+            msg.content = JSON.stringify({ url: result.url, name: file.name, size: file.size });
+        } else {
+            msg.content = result.url;
+        }
         ws.send(JSON.stringify(msg));
     } catch (error) {
         alert('上传失败: ' + error.message);
     }
 }
-
-fileInput.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('username', username);
-
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-
-        const result = await response.json();
-
-        const msg = {
-            type: privateTarget ? 'private' : 'message',
-            username: username,
-            content: JSON.stringify({
-                url: result.url,
-                name: file.name,
-                size: file.size
-            }),
-            data_type: 'file'
-        };
-        if (privateTarget) msg.to = privateTarget;
-
-        ws.send(JSON.stringify(msg));
-    } catch (error) {
-        alert('上传失败: ' + error.message);
-    }
-
-    fileInput.value = '';
-};
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -457,10 +467,8 @@ function previewImage(src) {
     const overlay = document.createElement('div');
     overlay.className = 'preview-overlay';
     overlay.onclick = () => overlay.remove();
-
     const img = document.createElement('img');
     img.src = src;
-
     overlay.appendChild(img);
     document.body.appendChild(overlay);
 }
@@ -476,61 +484,19 @@ document.addEventListener('paste', async (e) => {
     for (let item of items) {
         if (item.type.startsWith('image/')) {
             e.preventDefault();
-            const file = item.getAsFile();
-            await uploadAndSendImage(file);
+            await uploadAndSend(item.getAsFile(), 'image');
             break;
         }
     }
 });
 
-async function uploadAndSendImage(file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('username', username);
-
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-
-        const result = await response.json();
-
-        const msg = {
-            type: privateTarget ? 'private' : 'message',
-            username: username,
-            content: result.url,
-            data_type: 'image'
-        };
-        if (privateTarget) msg.to = privateTarget;
-
-        ws.send(JSON.stringify(msg));
-    } catch (error) {
-        alert('上传失败: ' + error.message);
-    }
-}
-
 settingsBtn.onclick = () => {
     qrcodeDiv.innerHTML = '';
     const url = window.location.href;
-    new QRCode(qrcodeDiv, {
-        text: url,
-        width: 200,
-        height: 200,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.H
-    });
+    new QRCode(qrcodeDiv, { text: url, width: 200, height: 200, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
     currentUrlP.textContent = url;
     settingsModal.style.display = 'flex';
 };
 
-closeModalBtn.onclick = () => {
-    settingsModal.style.display = 'none';
-};
-
-settingsModal.onclick = (e) => {
-    if (e.target === settingsModal) {
-        settingsModal.style.display = 'none';
-    }
-};
+closeModalBtn.onclick = () => { settingsModal.style.display = 'none'; };
+settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.style.display = 'none'; };

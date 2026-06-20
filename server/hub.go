@@ -7,11 +7,14 @@ import (
 )
 
 type Message struct {
-	Type     string `json:"type"`
-	Username string `json:"username"`
-	Content  string `json:"content"`
-	DataType string `json:"data_type,omitempty"`
-	To       string `json:"to,omitempty"`
+	Type     string            `json:"type"`
+	Username string            `json:"username"`
+	Content  string            `json:"content"`
+	DataType string            `json:"data_type,omitempty"`
+	To       string            `json:"to,omitempty"`
+	ReplyTo  string            `json:"reply_to,omitempty"`
+	Reaction string            `json:"reaction,omitempty"`
+	MsgID    string            `json:"msg_id,omitempty"`
 }
 
 type Hub struct {
@@ -21,6 +24,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	store      *MessageStore
+	reactions  map[string]map[string]string // msgID -> {username: emoji}
 	mu         sync.RWMutex
 }
 
@@ -32,6 +36,7 @@ func NewHub(store *MessageStore) *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		store:      store,
+		reactions:  make(map[string]map[string]string),
 	}
 }
 
@@ -195,6 +200,38 @@ func (h *Hub) notifyMention(content, sender string) {
 			i += len(name)
 		}
 	}
+}
+
+func (h *Hub) handleReaction(msg Message) {
+	if msg.MsgID == "" || msg.Reaction == "" {
+		return
+	}
+	h.mu.Lock()
+	if h.reactions[msg.MsgID] == nil {
+		h.reactions[msg.MsgID] = make(map[string]string)
+	}
+	if h.reactions[msg.MsgID][msg.Username] == msg.Reaction {
+		delete(h.reactions[msg.MsgID], msg.Username)
+	} else {
+		h.reactions[msg.MsgID][msg.Username] = msg.Reaction
+	}
+	reactions := h.reactions[msg.MsgID]
+	h.mu.Unlock()
+
+	update := Message{
+		Type:    "reaction_update",
+		MsgID:   msg.MsgID,
+		Content: mustMarshal(reactions),
+	}
+	data, _ := json.Marshal(update)
+	h.mu.RLock()
+	for client := range h.clients {
+		select {
+		case client.send <- data:
+		default:
+		}
+	}
+	h.mu.RUnlock()
 }
 
 func mustMarshal(v interface{}) string {
