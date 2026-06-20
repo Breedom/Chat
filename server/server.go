@@ -1,10 +1,12 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -17,19 +19,26 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+var videoExts = map[string]bool{
+	".mp4": true, ".webm": true, ".ogg": true, ".mov": true, ".avi": true, ".mkv": true,
+}
+
 type Server struct {
-	hub    *Hub
-	addr   string
+	hub       *Hub
+	addr      string
 	staticDir string
-	uploadDir  string
+	uploadDir string
+	store     *MessageStore
 }
 
 func NewServer(addr, staticDir, uploadDir string) *Server {
+	store := NewMessageStore(uploadDir)
 	return &Server{
-		hub:       NewHub(),
+		hub:       NewHub(store),
 		addr:      addr,
 		staticDir: staticDir,
 		uploadDir: uploadDir,
+		store:     store,
 	}
 }
 
@@ -58,6 +67,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := NewClient(s.hub, conn, username)
+	client.onMessage = s.handleBroadcast
 	s.hub.register <- client
 
 	go client.WritePump()
@@ -103,10 +113,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileURL := fmt.Sprintf("/files/%s", filename)
+	ext := strings.ToLower(filepath.Ext(handler.Filename))
+	isVideo := videoExts[ext]
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf(`{"url":"%s","name":"%s"}`, fileURL, handler.Filename)))
+	resp := fmt.Sprintf(`{"url":"%s","name":"%s","video":%t}`, fileURL, handler.Filename, isVideo)
+	w.Write([]byte(resp))
 }
 
 func (s *Server) handleFileServer(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix("/files/", http.FileServer(http.Dir(s.uploadDir))).ServeHTTP(w, r)
+}
+
+func (s *Server) handleBroadcast(data []byte) {
+	var msg Message
+	if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "message" {
+		s.store.Append(msg)
+	}
+	s.hub.broadcast <- data
 }

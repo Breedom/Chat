@@ -285,6 +285,25 @@ body {
     transform: scale(1.02);
 }
 
+/* Video messages */
+.message-content.video {
+    padding: 6px;
+    background: white;
+    border-radius: 18px;
+}
+
+.message-self .message-content.video {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.message-content.video video {
+    max-width: 320px;
+    max-height: 280px;
+    border-radius: 14px;
+    display: block;
+    background: #000;
+}
+
 /* File messages */
 .message-content.file {
     display: flex;

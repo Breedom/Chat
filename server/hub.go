@@ -18,15 +18,17 @@ type Hub struct {
 	broadcast  chan []byte
 	register   chan *Client
 	unregister chan *Client
+	store      *MessageStore
 	mu         sync.RWMutex
 }
 
-func NewHub() *Hub {
+func NewHub(store *MessageStore) *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		store:      store,
 	}
 }
 
@@ -38,6 +40,7 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.mu.Unlock()
 			log.Printf("Client connected: %s", client.username)
+			h.sendHistory(client)
 			h.sendUserList()
 
 		case client := <-h.unregister:
@@ -62,6 +65,26 @@ func (h *Hub) Run() {
 			}
 			h.mu.RUnlock()
 		}
+	}
+}
+
+func (h *Hub) sendHistory(client *Client) {
+	msgs := h.store.GetRecent()
+	if len(msgs) == 0 {
+		return
+	}
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		return
+	}
+	wrapper := Message{
+		Type:    "history",
+		Content: string(data),
+	}
+	wrapperData, _ := json.Marshal(wrapper)
+	select {
+	case client.send <- wrapperData:
+	default:
 	}
 }
 

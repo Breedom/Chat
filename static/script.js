@@ -12,6 +12,8 @@ const userList = document.getElementById('user-list');
 const onlineCount = document.getElementById('online-count');
 const imageBtn = document.getElementById('image-btn');
 const fileBtn = document.getElementById('file-btn');
+const videoBtn = document.getElementById('video-btn');
+const videoInput = document.getElementById('video-input');
 const imageInput = document.getElementById('image-input');
 const fileInput = document.getElementById('file-input');
 const emojiBtn = document.getElementById('emoji-btn');
@@ -86,6 +88,9 @@ function handleMessage(msg) {
         case 'message':
             addChatMessage(msg);
             break;
+        case 'history':
+            loadHistory(JSON.parse(msg.content));
+            break;
         case 'user_list':
             updateUserList(JSON.parse(msg.content));
             break;
@@ -95,18 +100,40 @@ function handleMessage(msg) {
     }
 }
 
+function loadHistory(msgs) {
+    msgs.forEach(m => {
+        addChatMessage({
+            type: 'message',
+            username: m.username,
+            content: m.content,
+            data_type: m.data_type,
+            time: m.time
+        });
+    });
+    if (msgs.length > 0) {
+        addSystemMessage(`已加载 ${msgs.length} 条历史消息`);
+    }
+}
+
 function addChatMessage(msg) {
     const div = document.createElement('div');
     const isSelf = msg.username === username;
     div.className = `message ${isSelf ? 'message-self' : 'message-others'}`;
 
-    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const time = msg.time
+        ? new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        : new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
     let contentHTML = '';
     if (msg.data_type === 'image') {
         contentHTML = `
             <div class="message-content image">
                 <img src="${msg.content}" onclick="previewImage(this.src)" loading="lazy">
+            </div>`;
+    } else if (msg.data_type === 'video') {
+        contentHTML = `
+            <div class="message-content video">
+                <video src="${msg.content}" controls preload="metadata" playsinline></video>
             </div>`;
     } else if (msg.data_type === 'file') {
         const fileInfo = JSON.parse(msg.content);
@@ -182,6 +209,7 @@ emojiBtn.onclick = (e) => {
 };
 
 imageBtn.onclick = () => imageInput.click();
+videoBtn.onclick = () => videoInput.click();
 fileBtn.onclick = () => fileInput.click();
 
 imageInput.onchange = async (e) => {
@@ -196,6 +224,43 @@ imageInput.onchange = async (e) => {
     await uploadAndSendImage(file);
     imageInput.value = '';
 };
+
+videoInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('video/')) {
+        alert('请选择视频文件');
+        return;
+    }
+
+    await uploadAndSendVideo(file);
+    videoInput.value = '';
+};
+
+async function uploadAndSendVideo(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('username', username);
+
+    try {
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        ws.send(JSON.stringify({
+            type: 'message',
+            username: username,
+            content: result.url,
+            data_type: 'video'
+        }));
+    } catch (error) {
+        alert('上传失败: ' + error.message);
+    }
+}
 
 fileInput.onchange = async (e) => {
     const file = e.target.files[0];

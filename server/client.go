@@ -15,10 +15,11 @@ const (
 )
 
 type Client struct {
-	hub      *Hub
-	conn     *websocket.Conn
-	send     chan []byte
-	username string
+	hub       *Hub
+	conn      *websocket.Conn
+	send      chan []byte
+	username  string
+	onMessage func([]byte)
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, username string) *Client {
@@ -52,7 +53,11 @@ func (c *Client) ReadPump() {
 			break
 		}
 
-		c.hub.broadcast <- message
+		if c.onMessage != nil {
+			c.onMessage(message)
+		} else {
+			c.hub.broadcast <- message
+		}
 	}
 }
 
