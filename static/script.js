@@ -7,6 +7,26 @@ let replyingTo = null;
 let unreadCount = 0;
 let originalTitle = document.title;
 
+// Fallback syntax highlighter if hljs CDN fails
+const fallbackHighlight = {
+    keywords: /\b(function|const|let|var|return|if|else|for|while|class|import|export|from|default|new|this|async|await|try|catch|throw|switch|case|break|continue|do|in|of|typeof|instanceof|void|delete|null|undefined|true|false|None|True|False|def|print|self|elif|except|finally|raise|pass|lambda|yield|with|as|struct|func|package|go|defer|chan|map|string|int|bool|float64|fmt|println|printf)\b/g,
+    string: /(["'`])(?:(?!\1|\\).|\\.)*\1/g,
+    comment: /(\/\/.*$|\/\*[\s\S]*?\*\/|#.*$)/gm,
+    number: /\b\d+\.?\d*\b/g,
+};
+
+function fallbackHighlightCode(code, lang) {
+    let html = code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    html = html.replace(fallbackHighlight.keywords, '<span class="hljs-keyword">$&</span>');
+    html = html.replace(fallbackHighlight.string, '<span class="hljs-string">$&</span>');
+    html = html.replace(fallbackHighlight.comment, '<span class="hljs-comment">$&</span>');
+    html = html.replace(fallbackHighlight.number, '<span class="hljs-number">$&</span>');
+    return html;
+}
+
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
 const usernameInput = document.getElementById('username-input');
@@ -191,9 +211,13 @@ async function loadCodePreview(url, ext) {
         const el = document.querySelector(`.code-preview[data-url="${url}"]`);
         if (el) {
             const code = el.querySelector('code');
-            code.textContent = text.slice(0, 5000);
             code.className = `language-${ext}`;
-            hljs.highlightElement(code);
+            if (typeof hljs !== 'undefined') {
+                code.textContent = text.slice(0, 5000);
+                hljs.highlightElement(code);
+            } else {
+                code.innerHTML = fallbackHighlightCode(text.slice(0, 5000));
+            }
         }
     } catch (e) {}
 }
@@ -244,7 +268,13 @@ function addChatMessage(msg) {
     messagesDiv.appendChild(div);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    div.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+    if (typeof hljs !== 'undefined') {
+        div.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+    } else {
+        div.querySelectorAll('pre code').forEach(block => {
+            block.innerHTML = fallbackHighlightCode(block.textContent);
+        });
+    }
 }
 
 function addPrivateMessage(msg) {
