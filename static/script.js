@@ -91,17 +91,41 @@ function joinChat() {
     connectWebSocket();
 }
 
+let reconnectDelay = 3000;
+
+function generateToken(username) {
+    // Simple HMAC token generation (matches server-side)
+    // For a LAN chat, this is sufficient - the secret is the same
+    const encoder = new TextEncoder();
+    const key = encoder.encode('chat-room-secret-2024');
+    const data = encoder.encode(username);
+    // Use SubtleCrypto for HMAC-SHA256
+    return crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+        .then(cryptoKey => crypto.subtle.sign('HMAC', cryptoKey, data))
+        .then(signature => Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join(''));
+}
+
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws?username=${encodeURIComponent(username)}`);
+    generateToken(username).then(token => {
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws?username=${encodeURIComponent(username)}&token=${token}`);
 
-    ws.onopen = () => addSystemMessage('已连接到聊天室');
-    ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
-    ws.onclose = () => {
-        addSystemMessage('连接已断开，3秒后尝试重连...');
-        setTimeout(connectWebSocket, 3000);
-    };
-    ws.onerror = (error) => console.error('WebSocket error:', error);
+        ws.onopen = () => {
+            reconnectDelay = 3000;
+            addSystemMessage('已连接到聊天室');
+        };
+        ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
+        ws.onclose = () => {
+            const delaySec = (reconnectDelay / 1000).toFixed(0);
+            addSystemMessage(`连接已断开，${delaySec}秒后尝试重连...`);
+            setTimeout(connectWebSocket, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        };
+        ws.onerror = (error) => console.error('WebSocket error:', error);
+    }).catch(err => {
+        console.error('Token generation failed:', err);
+        addSystemMessage('连接失败: 无法生成认证令牌');
+    });
 }
 
 function handleMessage(msg) {
@@ -153,6 +177,9 @@ function loadHistory(msgs) {
 }
 
 function generateMsgId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
@@ -644,9 +671,7 @@ function hideUploadProgress(id) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 function formatFileSize(bytes) {

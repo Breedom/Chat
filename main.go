@@ -6,7 +6,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/Breedom/Chat/server"
 	"github.com/mdp/qrterminal/v3"
@@ -84,6 +86,15 @@ func main() {
 	fmt.Println()
 	fmt.Println("========================================")
 	fmt.Println()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-quit
+		fmt.Println("\n正在关闭服务器...")
+		srv.Stop()
+	}()
 
 	if err := srv.Start(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
