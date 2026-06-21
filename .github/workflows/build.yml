@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build
 
 on:
   push:
@@ -6,6 +6,12 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0). Leave empty to skip release."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -22,6 +28,9 @@ jobs:
           - goos: linux
             goarch: amd64
             output: chat-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output: chat-linux-arm64
           - goos: darwin
             goarch: amd64
             output: chat-macos-amd64
@@ -34,13 +43,14 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags="-s -w" -o ${{ matrix.output }} .
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o ${{ matrix.output }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -48,21 +58,75 @@ jobs:
           name: ${{ matrix.output }}
           path: ${{ matrix.output }}
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+  checksums:
     runs-on: ubuntu-latest
+    needs: build
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           path: dist
           merge-multiple: true
 
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum * > checksums-sha256.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v6
+        with:
+          name: checksums
+          path: dist/checksums-sha256.txt
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: chat-*
+
+      - name: Download checksums
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          name: checksums
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since $PREV_TAG" > changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"- %s (%h)" "$PREV_TAG"..HEAD >> changelog.md
+          else
+            echo "## Initial Release" > changelog.md
+          fi
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          echo "## Downloads" >> changelog.md
+          echo "| Platform | File |" >> changelog.md
+          echo "|----------|------|" >> changelog.md
+          echo "| Windows (x64) | \`chat-windows-amd64.exe\` |" >> changelog.md
+          echo "| Linux (x64) | \`chat-linux-amd64\` |" >> changelog.md
+          echo "| Linux (ARM64) | \`chat-linux-arm64\` |" >> changelog.md
+          echo "| macOS (x64) | \`chat-macos-amd64\` |" >> changelog.md
+          echo "| macOS (Apple Silicon) | \`chat-macos-arm64\` |" >> changelog.md
+          echo "" >> changelog.md
+          echo "SHA-256 checksums are provided in \`checksums-sha256.txt\`." >> changelog.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
+          body_path: changelog.md
+          files: |
+            dist/chat-*
+            dist/checksums-sha256.txt

@@ -12,6 +12,9 @@ import (
 	"github.com/mdp/qrterminal/v3"
 )
 
+// version is set via -ldflags at build time.
+var version = "dev"
+
 func getLocalIPs() []string {
 	var ips []string
 	addrs, err := net.InterfaceAddrs()
@@ -49,7 +52,7 @@ func main() {
 	srv := server.NewServer(addr, absStatic, absUpload)
 
 	fmt.Println("========================================")
-	fmt.Println("       局域网聊天室服务器")
+	fmt.Printf("       局域网聊天室服务器 %s\n", version)
 	fmt.Println("========================================")
 	fmt.Println()
 	fmt.Println("本机访问:")
