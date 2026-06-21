@@ -29,6 +29,8 @@ type Hub struct {
 	mu         sync.RWMutex
 }
 
+const maxReactions = 5000
+
 func NewHub(store *MessageStore) *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
@@ -63,16 +65,27 @@ func (h *Hub) Run() {
 			h.sendUserList()
 
 		case message := <-h.broadcast:
+			// Collect slow clients under RLock, then remove under Lock to avoid data race.
 			h.mu.RLock()
+			var dead []*Client
 			for client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					dead = append(dead, client)
 				}
 			}
 			h.mu.RUnlock()
+			if len(dead) > 0 {
+				h.mu.Lock()
+				for _, client := range dead {
+					if _, ok := h.clients[client]; ok {
+						close(client.send)
+						delete(h.clients, client)
+					}
+				}
+				h.mu.Unlock()
+			}
 
 		case data := <-h.private:
 			var msg Message
@@ -98,7 +111,17 @@ func (h *Hub) sendHistory(client *Client) {
 	if len(msgs) == 0 {
 		return
 	}
-	data, err := json.Marshal(msgs)
+	// Filter out private messages — they should not be broadcast via history.
+	var filtered []StoredMessage
+	for _, m := range msgs {
+		if m.Type != "private" {
+			filtered = append(filtered, m)
+		}
+	}
+	if len(filtered) == 0 {
+		return
+	}
+	data, err := json.Marshal(filtered)
 	if err != nil {
 		return
 	}
@@ -227,8 +250,20 @@ func (h *Hub) handleReaction(msg Message) {
 	}
 	if h.reactions[msg.MsgID][msg.Username] == msg.Reaction {
 		delete(h.reactions[msg.MsgID], msg.Username)
+		if len(h.reactions[msg.MsgID]) == 0 {
+			delete(h.reactions, msg.MsgID)
+		}
 	} else {
 		h.reactions[msg.MsgID][msg.Username] = msg.Reaction
+	}
+	// Evict oldest entries when the map grows too large.
+	if len(h.reactions) > maxReactions {
+		for k := range h.reactions {
+			delete(h.reactions, k)
+			if len(h.reactions) <= maxReactions*3/4 {
+				break
+			}
+		}
 	}
 	reactions := h.reactions[msg.MsgID]
 	h.mu.Unlock()

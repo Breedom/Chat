@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -22,6 +24,63 @@ var upgrader = websocket.Upgrader{
 
 var videoExts = map[string]bool{
 	".mp4": true, ".webm": true, ".ogg": true, ".mov": true, ".avi": true, ".mkv": true,
+}
+
+// uploadIDRe restricts upload IDs to safe alphanumeric tokens.
+var uploadIDRe = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+
+// sanitizeFilename strips directory separators and ".." components to prevent
+// path traversal. Returns "unnamed" if the result is empty.
+func sanitizeFilename(name string) string {
+	// Strip any directory components the client may have included.
+	name = filepath.Base(name)
+	// Replace characters that could be used for traversal or are problematic.
+	replacer := strings.NewReplacer(
+		"..", "",
+		"/", "_",
+		`\`, "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	name = replacer.Replace(name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == "_" {
+		name = "unnamed"
+	}
+	return name
+}
+
+// isSafeUploadID checks that an upload ID contains only safe characters.
+func isSafeUploadID(id string) bool {
+	return id != "" && uploadIDRe.MatchString(id)
+}
+
+// cleanOrphanedChunks removes chunk directories older than the given duration.
+func cleanOrphanedChunks(uploadDir string, maxAge time.Duration) {
+	chunksDir := filepath.Join(uploadDir, "chunks")
+	entries, err := os.ReadDir(chunksDir)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > maxAge {
+			os.RemoveAll(filepath.Join(chunksDir, entry.Name()))
+			log.Printf("Cleaned orphaned chunk dir: %s", entry.Name())
+		}
+	}
 }
 
 type Server struct {
@@ -45,6 +104,9 @@ func NewServer(addr, staticDir, uploadDir string) *Server {
 
 func (s *Server) Start() error {
 	go s.hub.Run()
+
+	// Clean up orphaned chunks from previous runs on startup.
+	cleanOrphanedChunks(s.uploadDir, 1*time.Hour)
 
 	http.HandleFunc("/ws", s.handleWebSocket)
 	http.HandleFunc("/upload", s.handleUpload)
@@ -100,7 +162,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	filename := fmt.Sprintf("%s_%s", r.FormValue("username"), handler.Filename)
+	username := sanitizeFilename(r.FormValue("username"))
+	safeName := sanitizeFilename(handler.Filename)
+	filename := fmt.Sprintf("%s_%s", username, safeName)
 	savePath := filepath.Join(s.uploadDir, filename)
 
 	dst, err := createFile(savePath)
@@ -141,6 +205,11 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	filename := r.FormValue("filename")
 	user := r.FormValue("username")
 
+	if !isSafeUploadID(uploadID) {
+		http.Error(w, "Invalid upload_id", http.StatusBadRequest)
+		return
+	}
+
 	file, _, err := r.FormFile("chunk")
 	if err != nil {
 		http.Error(w, "Error reading chunk", http.StatusBadRequest)
@@ -179,10 +248,17 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	totalChunks := 0
 	fmt.Sscanf(r.FormValue("total_chunks"), "%d", &totalChunks)
 
+	if !isSafeUploadID(uploadID) {
+		http.Error(w, "Invalid upload_id", http.StatusBadRequest)
+		return
+	}
+
 	chunkDir := filepath.Join(s.uploadDir, "chunks", uploadID)
 	defer os.RemoveAll(chunkDir)
 
-	finalName := fmt.Sprintf("%s_%s", user, filename)
+	username := sanitizeFilename(user)
+	safeName := sanitizeFilename(filename)
+	finalName := fmt.Sprintf("%s_%s", username, safeName)
 	finalPath := filepath.Join(s.uploadDir, finalName)
 
 	dst, err := createFile(finalPath)
