@@ -697,16 +697,40 @@ settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.s
 
 // ========== Dark Mode ==========
 const darkModeBtn = document.getElementById('darkmode-btn');
-if (localStorage.getItem('darkMode') === 'true') {
-    document.body.classList.add('dark');
-    darkModeBtn.textContent = '☀️';
+
+// 系统主题偏好检测
+function applyTheme(isDark) {
+    document.body.classList.toggle('dark', isDark);
+    darkModeBtn.textContent = isDark ? '☀️' : '🌙';
 }
 
+// 首次加载：没有 localStorage 时跟随系统偏好
+const storedPref = localStorage.getItem('darkMode');
+if (storedPref !== null) {
+    applyTheme(storedPref === 'true');
+} else {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(prefersDark);
+}
+
+// 监听系统主题变化（只在用户未手动设置时跟随）
+const colorSchemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+colorSchemeMedia.addEventListener('change', (e) => {
+    if (localStorage.getItem('darkMode') === null) {
+        applyTheme(e.matches);
+    }
+});
+
 darkModeBtn.onclick = () => {
-    document.body.classList.toggle('dark');
-    const isDark = document.body.classList.contains('dark');
+    // 按钮旋转动效
+    darkModeBtn.classList.remove('theme-spin');
+    // 触发 reflow 以重启动画
+    void darkModeBtn.offsetWidth;
+    darkModeBtn.classList.add('theme-spin');
+
+    const isDark = !document.body.classList.contains('dark');
+    applyTheme(isDark);
     localStorage.setItem('darkMode', isDark);
-    darkModeBtn.textContent = isDark ? '☀️' : '🌙';
 };
 
 // ========== Export ==========
