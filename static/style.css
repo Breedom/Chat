@@ -59,7 +59,7 @@ body {
     background: var(--bg-primary);
     height: 100vh;
     overflow: hidden;
-    transition: background 0.3s, color 0.3s;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* ========== Login Screen ========== */
@@ -141,6 +141,7 @@ body {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    transition: background-color 0.3s ease;
 }
 
 .sidebar h2 {
@@ -200,6 +201,7 @@ body {
     justify-content: space-between;
     align-items: center;
     box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .header h2 {
@@ -299,6 +301,7 @@ body {
     position: relative;
     min-width: 0;
     max-width: 100%;
+    transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .message-others .message-content {
@@ -442,6 +445,7 @@ body {
     padding: 20px 25px;
     background: var(--bg-card);
     border-top: 1px solid var(--border-color);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .toolbar {
@@ -484,7 +488,7 @@ body {
     resize: none;
     outline: none;
     font-family: inherit;
-    transition: all 0.2s;
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.2s;
     min-height: 44px;
     max-height: 120px;
     background: var(--bg-input);
@@ -525,6 +529,7 @@ body {
     padding: 15px;
     z-index: 100;
     animation: fadeInUp 0.2s ease;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .emoji-grid {
@@ -616,6 +621,7 @@ body {
     max-width: 90%;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     animation: fadeInUp 0.3s ease;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .modal-header {
@@ -751,6 +757,7 @@ body {
     overflow: hidden;
     background: var(--code-bg);
     border: 1px solid var(--code-border);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .code-lang {
@@ -878,6 +885,7 @@ body {
     display: flex;
     gap: 4px;
     z-index: 50;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
     animation: fadeInUp 0.15s ease;
 }
 
@@ -921,6 +929,16 @@ body {
     background: rgba(255,255,255,0.15);
     border-left-color: rgba(255,255,255,0.6);
     color: rgba(255,255,255,0.8);
+}
+
+/* ========== Dark Mode Toggle Button Animation ========== */
+#darkmode-btn.theme-spin {
+    animation: themeSpin 0.5s ease;
+}
+
+@keyframes themeSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 /* ========== Dark Mode Overrides ========== */
