@@ -26,6 +26,7 @@ type MessageStore struct {
 	mu       sync.RWMutex
 	messages []StoredMessage
 	filePath string
+	dirty    bool
 }
 
 func NewMessageStore(uploadDir string) *MessageStore {
@@ -59,6 +60,7 @@ func (ms *MessageStore) save() {
 		return
 	}
 	os.WriteFile(ms.filePath, data, 0644)
+	ms.dirty = false
 }
 
 func (ms *MessageStore) Append(msg Message) {
@@ -76,9 +78,8 @@ func (ms *MessageStore) Append(msg Message) {
 	if len(ms.messages) > maxStoredMessages {
 		ms.messages = ms.messages[len(ms.messages)-maxStoredMessages:]
 	}
+	ms.dirty = true
 	ms.mu.Unlock()
-
-	ms.save()
 }
 
 func (ms *MessageStore) Recall(msgID string) {
@@ -90,8 +91,21 @@ func (ms *MessageStore) Recall(msgID string) {
 			break
 		}
 	}
+	ms.dirty = true
 	ms.mu.Unlock()
-	ms.save()
+}
+
+func (ms *MessageStore) GetMessage(msgID string) *StoredMessage {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	for i := range ms.messages {
+		if ms.messages[i].MsgID == msgID {
+			msg := ms.messages[i]
+			return &msg
+		}
+	}
+	return nil
 }
 
 func (ms *MessageStore) GetRecent() []StoredMessage {
@@ -101,4 +115,16 @@ func (ms *MessageStore) GetRecent() []StoredMessage {
 	result := make([]StoredMessage, len(ms.messages))
 	copy(result, ms.messages)
 	return result
+}
+
+func (ms *MessageStore) StartFlusher() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		ms.mu.Lock()
+		if ms.dirty {
+			ms.save()
+		}
+		ms.mu.Unlock()
+	}
 }

@@ -92,16 +92,28 @@ func (h *Hub) Run() {
 			if err := json.Unmarshal(data, &msg); err != nil {
 				continue
 			}
+			var toRemove []*Client
 			h.mu.RLock()
 			for client := range h.clients {
 				if client.username == msg.To || client.username == msg.Username {
 					select {
 					case client.send <- data:
 					default:
+						toRemove = append(toRemove, client)
 					}
 				}
 			}
 			h.mu.RUnlock()
+			if len(toRemove) > 0 {
+				h.mu.Lock()
+				for _, client := range toRemove {
+					if _, ok := h.clients[client]; ok {
+						close(client.send)
+						delete(h.clients, client)
+					}
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
